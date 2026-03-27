@@ -1,15 +1,16 @@
 import os
 from app import app, db, login_manager
-from flask import render_template, request, redirect, url_for, flash, session, abort
+from flask import render_template, request, redirect, url_for, flash, session, abort, send_from_directory
 from flask_login import login_user, logout_user, current_user, login_required
 from werkzeug.utils import secure_filename
+from werkzeug.security import check_password_hash
 from app.models import UserProfile
 from app.forms import LoginForm, UploadForm
-from werkzeug.security import check_password_hash
 
 ###
 # Routing for your application.
 ###
+
 
 @app.route('/')
 def home():
@@ -23,7 +24,7 @@ def about():
     return render_template('about.html', name="Mary Jane")
 
 
-@app.route('/upload', methods=['POST', 'GET'])
+@app.route('/upload', methods=['GET', 'POST'])
 @login_required
 def upload():
     form = UploadForm()
@@ -35,12 +36,12 @@ def upload():
         photo.save(filepath)
 
         flash('File Saved', 'success')
-        return redirect(url_for('upload'))
+        return redirect(url_for('files'))
 
     return render_template('upload.html', form=form)
 
 
-@app.route('/login', methods=['POST', 'GET'])
+@app.route('/login', methods=['GET', 'POST'])
 def login():
     form = LoginForm()
 
@@ -53,15 +54,55 @@ def login():
         if user and check_password_hash(user.password, password):
             login_user(user)
             flash('You have been successfully logged in.', 'success')
-            return redirect(url_for("upload"))
+            return redirect(url_for('upload'))
         else:
             flash('Invalid username or password.', 'danger')
 
-    return render_template("login.html", form=form)
+    return render_template('login.html', form=form)
+
+
+@app.route('/uploads/<filename>')
+def get_image(filename):
+    return send_from_directory(
+        os.path.join(os.getcwd(), app.config['UPLOAD_FOLDER']),
+        filename
+    )
+
+
+@app.route('/files')
+@login_required
+def files():
+    images = get_uploaded_images()
+    return render_template('files.html', images=images)
+
+
+@app.route('/logout')
+@login_required
+def logout():
+    logout_user()
+    flash('You have been logged out.', 'success')
+    return redirect(url_for('home'))
+
 
 @login_manager.user_loader
 def load_user(id):
-    return db.session.execute(db.select(UserProfile).filter_by(id=id)).scalar()
+    return db.session.execute(
+        db.select(UserProfile).filter_by(id=id)
+    ).scalar()
+
+
+def get_uploaded_images():
+    images = []
+    rootdir = os.path.join(os.getcwd(), app.config['UPLOAD_FOLDER'])
+    allowed_extensions = ('.jpg', '.jpeg', '.png', '.gif')
+
+    for subdir, dirs, files in os.walk(rootdir):
+        for file in files:
+            if file.lower().endswith(allowed_extensions):
+                images.append(file)
+
+    return images
+
 
 ###
 # The functions below should be applicable to all Flask apps.
@@ -71,10 +112,14 @@ def load_user(id):
 def flash_errors(form):
     for field, errors in form.errors.items():
         for error in errors:
-            flash(u"Error in the %s field - %s" % (
-                getattr(form, field).label.text,
-                error
-), 'danger')
+            flash(
+                u"Error in the %s field - %s" % (
+                    getattr(form, field).label.text,
+                    error
+                ),
+                'danger'
+            )
+
 
 @app.route('/<file_name>.txt')
 def send_text_file(file_name):
